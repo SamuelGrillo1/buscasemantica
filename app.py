@@ -9,10 +9,9 @@ import torch
 from io import BytesIO
 from PIL import Image
 
-# Download NLTK tokenizer
 nltk.download('punkt')
 
-# Cache the model and tokenizer to improve performance
+
 @st.cache_resource
 def get_model_and_tokenizer():
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
@@ -118,11 +117,11 @@ def get_pdf_page_image(filepath, page_number):
         return None
 
 
-# Streamlit app
+
 st.title("Ferramenta de Busca Semântica para Técnicos")
 
-# Alteração do caminho para a pasta correta no repositório
-docs_directory = "Dataset_BS"  # Atualizado para usar o diretório correto
+
+docs_directory = "Dataset_BS"  
 documents = load_documents_from_directory(docs_directory)
 
 if documents:
