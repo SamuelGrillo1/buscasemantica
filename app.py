@@ -9,9 +9,10 @@ import torch
 from io import BytesIO
 from PIL import Image
 
+# Download NLTK tokenizer
 nltk.download('punkt')
 
-
+# Cache the model and tokenizer to improve performance
 @st.cache_resource
 def get_model_and_tokenizer():
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
@@ -21,21 +22,38 @@ def get_model_and_tokenizer():
 tokenizer, model = get_model_and_tokenizer()
 
 
-def extract_text_from_file(file):
+def load_documents_from_directory(directory):
+    documents = []
+    for filename in os.listdir(directory):
+        filepath = os.path.join(directory, filename)
+        if filepath.endswith(".txt") or filepath.endswith(".pdf"):
+            text, pages = extract_text_from_file(filepath)
+            if text:
+                tokens = nltk.word_tokenize(text)
+                documents.append({
+                    'filename': filename,
+                    'content': " ".join(tokens),
+                    'pages': pages
+                })
+    return documents
+
+
+def extract_text_from_file(filepath):
     text = ""
     pages = []
-    if file.type == "text/plain":
-        text = file.read().decode('utf-8')
-    elif file.type == "application/pdf":
-        text, pages = extract_text_from_pdf(file)
+    if filepath.endswith(".txt"):
+        with open(filepath, 'r', encoding='utf-8') as file:
+            text = file.read()
+    elif filepath.endswith(".pdf"):
+        text, pages = extract_text_from_pdf(filepath)
     return text, pages
 
 
-def extract_text_from_pdf(file):
+def extract_text_from_pdf(filepath):
     text = ""
     pages = []
     try:
-        with pdfplumber.open(file) as pdf:
+        with pdfplumber.open(filepath) as pdf:
             for page_num, page in enumerate(pdf.pages):
                 page_text = page.extract_text()
                 if page_text:
@@ -84,9 +102,9 @@ def extract_relevant_snippets(query, document, pages, top_n=3):
     return snippets
 
 
-def get_pdf_page_image(file, page_number):
+def get_pdf_page_image(filepath, page_number):
     try:
-        with pdfplumber.open(file) as pdf:
+        with pdfplumber.open(filepath) as pdf:
             page = pdf.pages[page_number - 1]
             image = page.to_image(resolution=200)
 
@@ -100,26 +118,17 @@ def get_pdf_page_image(file, page_number):
         return None
 
 
-
+# Streamlit app
 st.title("Ferramenta de Busca Semântica para Técnicos")
 
-uploaded_files = st.file_uploader("Upload de documentos", accept_multiple_files=True, type=["txt", "pdf"])
+# Load documents automatically from the "docs" folder
+docs_directory = "docs"  # Path to your documents directory
+documents = load_documents_from_directory(docs_directory)
 
-if uploaded_files:
-    documents = []
-    for uploaded_file in uploaded_files:
-        text, pages = extract_text_from_file(uploaded_file)
-        if text:
-            tokens = nltk.word_tokenize(text)
-            documents.append({
-                'filename': uploaded_file.name,
-                'content': " ".join(tokens),
-                'pages': pages
-            })
-
+if documents:
     question = st.text_input("Como posso ajudar?")
     
-    if question and documents:
+    if question:
         results = search_best_practices(question, documents)
         st.write("Resultados encontrados:")
         for i, (filename, doc_content, pages, similarity) in enumerate(results):
@@ -131,6 +140,6 @@ if uploaded_files:
                 st.write(f"- {snippet} (Página {page})")
                 
                 if page and filename.endswith(".pdf"):
-                    page_image_buffer = get_pdf_page_image(uploaded_file, page)
+                    page_image_buffer = get_pdf_page_image(os.path.join(docs_directory, filename), page)
                     if page_image_buffer:
                         st.image(page_image_buffer, caption=f"Imagem da página {page} do documento {filename}")
