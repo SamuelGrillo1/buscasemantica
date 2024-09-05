@@ -4,7 +4,7 @@ import streamlit as st
 import numpy as np
 import pdfplumber
 from sklearn.metrics.pairwise import cosine_similarity
-from transformers import BertTokenizer, BertModel
+from transformers import DistilBertTokenizer, DistilBertModel
 import torch
 from io import BytesIO
 from PIL import Image
@@ -15,8 +15,8 @@ nltk.download('punkt')
 
 @st.cache_resource
 def get_model_and_tokenizer():
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    model = BertModel.from_pretrained('bert-base-uncased')
+    tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
+    model = DistilBertModel.from_pretrained('distilbert-base-uncased')
     return tokenizer, model
 
 tokenizer, model = get_model_and_tokenizer()
@@ -29,10 +29,9 @@ def load_documents_from_directory(directory):
         if filepath.endswith(".txt") or filepath.endswith(".pdf"):
             text, pages = extract_text_from_file(filepath)
             if text:
-                tokens = nltk.word_tokenize(text)
                 documents.append({
                     'filename': filename,
-                    'content': " ".join(tokens),
+                    'content': text,  
                     'pages': pages
                 })
     return documents
@@ -65,40 +64,42 @@ def extract_text_from_pdf(filepath):
 
 
 def get_bert_embeddings(text):
-    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
+    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=256)
     outputs = model(**inputs)
     embeddings = outputs.last_hidden_state.mean(dim=1)
     return embeddings
 
 
-def calculate_similarity(query_embedding, doc_embeddings):
-    cosine_similarities = cosine_similarity(query_embedding.detach().numpy(), doc_embeddings.detach().numpy())
-    return cosine_similarities.flatten()
-
-
 def search_best_practices(query, documents):
     query_embedding = get_bert_embeddings(query)
-    doc_embeddings = torch.vstack([get_bert_embeddings(doc['content']) for doc in documents])
-    
-    cosine_similarities = calculate_similarity(query_embedding, doc_embeddings)
-    related_docs_indices = cosine_similarities.argsort()[::-1]
-    
     results = []
-    for idx in related_docs_indices[:5]:
-        doc = documents[idx]
-        results.append((doc['filename'], doc['content'], doc['pages'], cosine_similarities[idx]))
-    return results
+    
+
+    for doc in documents:
+        doc_embedding = get_bert_embeddings(doc['content'])
+        similarity = calculate_similarity(query_embedding, doc_embedding)
+        results.append((doc['filename'], doc['content'], doc['pages'], similarity))
+    
+
+    results.sort(key=lambda x: x[3], reverse=True)
+    return results[:5]  
+
+
+def calculate_similarity(query_embedding, doc_embedding):
+    return cosine_similarity(query_embedding.detach().numpy(), doc_embedding.detach().numpy()).flatten()[0]
 
 
 def extract_relevant_snippets(query, document, pages, top_n=3):
     sentences = nltk.sent_tokenize(document)
     query_embedding = get_bert_embeddings(query)
-    sentence_embeddings = torch.vstack([get_bert_embeddings(sentence) for sentence in sentences])
     
-    similarities = calculate_similarity(query_embedding, sentence_embeddings)
-    top_indices = similarities.argsort()[::-1][:top_n]
+ 
+    sentence_embeddings = [get_bert_embeddings(sentence) for sentence in sentences]
+    similarities = [calculate_similarity(query_embedding, embedding) for embedding in sentence_embeddings]
     
-    snippets = [(sentences[i], pages[i]) for i in top_indices] if pages else [(sentences[i], None) for i in top_indices]
+    top_indices = np.argsort(similarities)[::-1][:top_n]
+    
+    snippets = [(sentences[i], pages[i] if pages else None) for i in top_indices]
     return snippets
 
 
@@ -118,17 +119,17 @@ def get_pdf_page_image(filepath, page_number):
         return None
 
 
-
 st.title("Ferramenta de Busca Semântica para Técnicos")
 
 
-docs_directory = "Dataset_BS" 
+docs_directory = "Dataset_BS"
 documents = load_documents_from_directory(docs_directory)
 
 if documents:
     question = st.text_input("Como posso ajudar?")
     
     if question:
+
         results = search_best_practices(question, documents)
         st.write("Resultados encontrados:")
         for i, (filename, doc_content, pages, similarity) in enumerate(results):
