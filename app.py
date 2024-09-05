@@ -9,6 +9,7 @@ import torch
 from io import BytesIO
 from PIL import Image
 
+
 nltk.download('punkt')
 
 
@@ -121,7 +122,7 @@ def get_pdf_page_image(filepath, page_number):
 st.title("Ferramenta de Busca Semântica para Técnicos")
 
 
-docs_directory = "Dataset_BS"  
+docs_directory = "Dataset_BS" 
 documents = load_documents_from_directory(docs_directory)
 
 if documents:
