@@ -121,8 +121,8 @@ def get_pdf_page_image(filepath, page_number):
 # Streamlit app
 st.title("Ferramenta de Busca Semântica para Técnicos")
 
-# Load documents automatically from the "docs" folder
-docs_directory = "docs"  # Path to your documents directory
+# Alteração do caminho para a pasta correta no repositório
+docs_directory = "Dataset_BS"  # Atualizado para usar o diretório correto
 documents = load_documents_from_directory(docs_directory)
 
 if documents:
