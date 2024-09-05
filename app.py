@@ -11,49 +11,36 @@ from PIL import Image
 
 nltk.download('punkt')
 
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-model = BertModel.from_pretrained('bert-base-uncased')
+
+@st.cache_resource
+def get_model_and_tokenizer():
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    model = BertModel.from_pretrained('bert-base-uncased')
+    return tokenizer, model
+
+tokenizer, model = get_model_and_tokenizer()
 
 
-def load_and_preprocess_documents(doc_directory):
-    documents = []
-    for filename in os.listdir(doc_directory):
-        if filename.endswith(".txt") or filename.endswith(".pdf") or filename.endswith(".docx"):
-            filepath = os.path.join(doc_directory, filename)
-            text, pages = extract_text_from_file(filepath)  
-            if text:
-           
-                tokens = nltk.word_tokenize(text)
-                documents.append({
-                    'filename': filename,
-                    'content': " ".join(tokens),
-                    'filepath': filepath,  
-                    'pages': pages  
-                })
-    return documents
-
-
-def extract_text_from_file(filepath):
+def extract_text_from_file(file):
     text = ""
     pages = []
-    if filepath.endswith(".txt"):
-        with open(filepath, 'r', encoding='utf-8') as file:
-            text = file.read()
-    elif filepath.endswith(".pdf"):
-        text, pages = extract_text_from_pdf(filepath)
+    if file.type == "text/plain":
+        text = file.read().decode('utf-8')
+    elif file.type == "application/pdf":
+        text, pages = extract_text_from_pdf(file)
     return text, pages
 
 
-def extract_text_from_pdf(filepath):
+def extract_text_from_pdf(file):
     text = ""
     pages = []
     try:
-        with pdfplumber.open(filepath) as pdf:
+        with pdfplumber.open(file) as pdf:
             for page_num, page in enumerate(pdf.pages):
                 page_text = page.extract_text()
                 if page_text:
                     text += page_text + "\n"
-                    pages.append(page_num + 1)  
+                    pages.append(page_num + 1)
     except Exception as e:
         st.error(f"Erro ao ler o PDF: {e}")
     return text, pages
@@ -62,7 +49,7 @@ def extract_text_from_pdf(filepath):
 def get_bert_embeddings(text):
     inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
     outputs = model(**inputs)
-    embeddings = outputs.last_hidden_state.mean(dim=1)  
+    embeddings = outputs.last_hidden_state.mean(dim=1)
     return embeddings
 
 
@@ -79,9 +66,9 @@ def search_best_practices(query, documents):
     related_docs_indices = cosine_similarities.argsort()[::-1]
     
     results = []
-    for idx in related_docs_indices[:5]:  
+    for idx in related_docs_indices[:5]:
         doc = documents[idx]
-        results.append((doc['filename'], doc['content'], doc['filepath'], doc['pages'], cosine_similarities[idx]))
+        results.append((doc['filename'], doc['content'], doc['pages'], cosine_similarities[idx]))
     return results
 
 
@@ -93,12 +80,13 @@ def extract_relevant_snippets(query, document, pages, top_n=3):
     similarities = calculate_similarity(query_embedding, sentence_embeddings)
     top_indices = similarities.argsort()[::-1][:top_n]
     
-    snippets = [(sentences[i], pages[i]) for i in top_indices]  
+    snippets = [(sentences[i], pages[i]) for i in top_indices] if pages else [(sentences[i], None) for i in top_indices]
+    return snippets
 
 
-def get_pdf_page_image(filepath, page_number):
+def get_pdf_page_image(file, page_number):
     try:
-        with pdfplumber.open(filepath) as pdf:
+        with pdfplumber.open(file) as pdf:
             page = pdf.pages[page_number - 1]
             image = page.to_image(resolution=200)
 
@@ -112,31 +100,37 @@ def get_pdf_page_image(filepath, page_number):
         return None
 
 
-base_dir = os.path.dirname(__file__)
-
-
-doc_directory = os.path.join(base_dir, "Dataset_BS")
-
-
-documents = load_and_preprocess_documents(doc_directory)
-
 
 st.title("Ferramenta de Busca Semântica para Técnicos")
 
-question = st.text_input("Como posso ajudar?")
+uploaded_files = st.file_uploader("Upload de documentos", accept_multiple_files=True, type=["txt", "pdf"])
 
-if question:
-    results = search_best_practices(question, documents)
-    st.write("Resultados encontrados:")
-    for i, (filename, doc_content, filepath, pages, similarity) in enumerate(results):
-        st.write(f"Resultado {i + 1}: Similaridade: {similarity:.4f}")
-        st.write(f"Documento: {filename}")
-        
-        snippets = extract_relevant_snippets(question, doc_content, pages)
-        for snippet, page in snippets:
-            st.write(f"- {snippet} (Página {page})")
+if uploaded_files:
+    documents = []
+    for uploaded_file in uploaded_files:
+        text, pages = extract_text_from_file(uploaded_file)
+        if text:
+            tokens = nltk.word_tokenize(text)
+            documents.append({
+                'filename': uploaded_file.name,
+                'content': " ".join(tokens),
+                'pages': pages
+            })
+
+    question = st.text_input("Como posso ajudar?")
+    
+    if question and documents:
+        results = search_best_practices(question, documents)
+        st.write("Resultados encontrados:")
+        for i, (filename, doc_content, pages, similarity) in enumerate(results):
+            st.write(f"Resultado {i + 1}: Similaridade: {similarity:.4f}")
+            st.write(f"Documento: {filename}")
             
-            if filepath.endswith(".pdf"):
-                page_image_buffer = get_pdf_page_image(filepath, page)  # Exibir a página relevante
-                if page_image_buffer:
-                    st.image(page_image_buffer, caption=f"Imagem da página {page} do documento {filename}")
+            snippets = extract_relevant_snippets(question, doc_content, pages)
+            for snippet, page in snippets:
+                st.write(f"- {snippet} (Página {page})")
+                
+                if page and filename.endswith(".pdf"):
+                    page_image_buffer = get_pdf_page_image(uploaded_file, page)
+                    if page_image_buffer:
+                        st.image(page_image_buffer, caption=f"Imagem da página {page} do documento {filename}")
